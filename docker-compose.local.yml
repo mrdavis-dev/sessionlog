@@ -1,0 +1,7 @@
+# Servidor local: publica el puerto solo en esta máquina.
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+# Para exponerlo en tu red local, cambia 127.0.0.1 por 0.0.0.0 (el token sigue siendo obligatorio).
+services:
+  session-log:
+    ports:
+      - "127.0.0.1:8000:8000"

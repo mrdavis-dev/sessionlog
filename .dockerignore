@@ -1,0 +1,9 @@
+.env
+.git
+.gitignore
+*.db
+*.db-*
+__pycache__/
+*.pyc
+.venv/
+tests/

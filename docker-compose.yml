@@ -1,0 +1,17 @@
+# Despliegue en Coolify (o cualquier host con Docker).
+# MCP_AUTH_TOKEN se define en las variables de entorno de Coolify o en .env, nunca en git.
+services:
+  session-log:
+    build: .
+    restart: unless-stopped
+    environment:
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?define MCP_AUTH_TOKEN}
+      SESSION_LOG_TZ: ${SESSION_LOG_TZ:-America/Panama}
+      MCP_ALLOWED_ORIGINS: ${MCP_ALLOWED_ORIGINS:-}
+    volumes:
+      - session-log-data:/data
+    expose:
+      - "8000"
+
+volumes:
+  session-log-data:
