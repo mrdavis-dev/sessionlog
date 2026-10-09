@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>session-log</title>
+<style>
+  :root { color-scheme: light dark; --b: #8884; --muted: #888; }
+  body { font: 15px/1.5 system-ui, sans-serif; max-width: 860px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.2rem; margin: 0 0 12px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
+  input, select, textarea, button { font: inherit; padding: 4px 8px; }
+  textarea { width: 100%; box-sizing: border-box; }
+  .card { border: 1px solid var(--b); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+  .meta { color: var(--muted); font-size: .85rem; }
+  .summary { white-space: pre-wrap; margin: 6px 0; }
+  .tag { background: var(--b); border-radius: 4px; padding: 0 6px; font-size: .8rem; margin-right: 4px; }
+  .actions { display: flex; gap: 6px; margin-top: 6px; }
+  dialog { width: min(640px, 94vw); }
+  dialog label { display: block; margin-top: 8px; font-size: .85rem; color: var(--muted); }
+  #report { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: .85rem; }
+  #msg { color: #c33; }
+</style>
+</head>
+<body>
+<h1>session-log</h1>
+
+<div class="bar">
+  <label>Últimos <input id="last" type="number" min="1" value="7" style="width:4em"> días</label>
+  <label>Desde <input id="from" type="date"></label>
+  <label>Hasta <input id="to" type="date"></label>
+  <select id="area">
+    <option value="">Todas las áreas</option>
+    <option>trabajo</option><option>personal</option><option>sin-area</option>
+  </select>
+  <input id="project" placeholder="Proyecto">
+  <button id="search">Buscar</button>
+  <button id="make-report">Crear reporte</button>
+  <button id="token-btn" title="Token de acceso">🔑</button>
+</div>
+<div id="msg"></div>
+<div id="list"></div>
+
+<dialog id="edit">
+  <form method="dialog" id="edit-form">
+    <label>Área <select name="area"><option>trabajo</option><option>personal</option></select></label>
+    <label>Proyecto <input name="project" style="width:100%;box-sizing:border-box"></label>
+    <label>Resumen <textarea name="summary" rows="6" required></textarea></label>
+    <label>Decisiones (una por línea) <textarea name="decisions" rows="3"></textarea></label>
+    <label>Pendientes (una por línea) <textarea name="pending" rows="3"></textarea></label>
+    <label>Tags (separados por coma) <input name="tags" style="width:100%;box-sizing:border-box"></label>
+    <div class="actions"><button value="ok">Guardar</button><button value="cancel" formnovalidate>Cancelar</button></div>
+  </form>
+</dialog>
+
+<dialog id="rep">
+  <div id="report"></div>
+  <div class="actions"><button id="copy">Copiar</button><button onclick="rep.close()">Cerrar</button></div>
+</dialog>
+
+<script>
+const $ = id => document.getElementById(id);
+const lines = s => s.split("\n").map(x => x.trim()).filter(Boolean);
+const store = { get: () => { try { return localStorage.token || ""; } catch { return ""; } },
+                set: t => { try { localStorage.token = t; } catch {} } };
+let sessions = [];
+
+async function api(method, url, body) {
+  const headers = { "Content-Type": "application/json" };
+  if (store.get()) headers.Authorization = "Bearer " + store.get();
+  const r = await fetch(url, { method, headers, body: body && JSON.stringify(body) });
+  if (r.status === 401) {
+    const t = prompt("Token de acceso (MCP_AUTH_TOKEN):");
+    if (t) { store.set(t); return api(method, url, body); }
+  }
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || r.status);
+  return data;
+}
+
+function query() {
+  const p = new URLSearchParams();
+  const f = $("from").value, t = $("to").value;
+  if (f || t) { if (f) p.set("from", f); if (t) p.set("to", t); }
+  else p.set("last", $("last").value || 7);
+  if ($("area").value) p.set("area", $("area").value);
+  if ($("project").value.trim()) p.set("project", $("project").value.trim());
+  return p.toString();
+}
+
+const run = fn => async (...a) => { $("msg").textContent = ""; try { await fn(...a); } catch (e) { $("msg").textContent = "Error: " + e.message; } };
+
+const el = (tag, props = {}, ...kids) => { const n = Object.assign(document.createElement(tag), props); n.append(...kids); return n; };
+
+function render() {
+  $("list").replaceChildren(...(sessions.length ? sessions.slice().reverse().map(card) : [el("p", { textContent: "Sin sesiones en ese periodo." })]));
+}
+
+function card(s) {
+  const d = new Date(s.created_at);
+  const c = el("div", { className: "card" },
+    el("div", { className: "meta", textContent: `#${s.id} · ${d.toLocaleString()} · ${s.project} · ${s.area || "sin-area"}` }),
+    el("div", { className: "summary", textContent: s.summary }));
+  for (const [label, key] of [["Decisiones", "decisions"], ["Pendientes", "pending"]])
+    if (s[key].length) c.append(el("div", { className: "meta", textContent: `${label}: ${s[key].join(" · ")}` }));
+  if (s.tags.length) c.append(el("div", {}, ...s.tags.map(t => el("span", { className: "tag", textContent: t }))));
+  c.append(el("div", { className: "actions" },
+    el("button", { textContent: "Editar", onclick: () => openEdit(s) }),
+    el("button", { textContent: "Borrar", onclick: run(async () => {
+      if (!confirm(`¿Borrar la sesión #${s.id}? No se puede deshacer.`)) return;
+      await api("DELETE", `/api/sessions/${s.id}`);
+      await load();
+    }) })));
+  return c;
+}
+
+const load = run(async () => { sessions = await api("GET", "/api/sessions?" + query()); render(); });
+
+let editing;
+function openEdit(s) {
+  editing = s;
+  const f = $("edit-form").elements;
+  f.area.value = s.area || "trabajo";
+  f.project.value = s.project;
+  f.summary.value = s.summary;
+  f.decisions.value = s.decisions.join("\n");
+  f.pending.value = s.pending.join("\n");
+  f.tags.value = s.tags.join(", ");
+  $("edit").showModal();
+}
+
+$("edit").addEventListener("close", run(async () => {
+  if ($("edit").returnValue !== "ok") return;
+  const f = $("edit-form").elements;
+  await api("PUT", `/api/sessions/${editing.id}`, {
+    area: f.area.value, project: f.project.value.trim(), summary: f.summary.value,
+    decisions: lines(f.decisions.value), pending: lines(f.pending.value),
+    tags: f.tags.value.split(",").map(x => x.trim()).filter(Boolean),
+  });
+  await load();
+}));
+
+$("make-report").onclick = run(async () => {
+  const { text } = await api("GET", "/api/report?" + query());
+  $("report").textContent = text;
+  $("rep").showModal();
+});
+$("copy").onclick = () => navigator.clipboard.writeText($("report").textContent);
+$("search").onclick = load;
+$("token-btn").onclick = () => { const t = prompt("Token de acceso:", store.get()); if (t !== null) { store.set(t); load(); } };
+load();
+</script>
+</body>
+</html>
