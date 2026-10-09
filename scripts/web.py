@@ -1,5 +1,6 @@
 """API REST mínima + página única para la interfaz web. Reusa la lógica de sessions.py."""
 import json
+import re
 from urllib.parse import parse_qs, urlparse
 
 from common import ROOT
@@ -8,6 +9,15 @@ from sessions import (
 )
 
 PAGE = (ROOT / "scripts" / "index.html").read_bytes()
+CSS_DIR = ROOT / "scripts" / "css"
+
+
+def css(name):
+    """Contenido de css/<name> o None. Solo nombres planos *.css, sin rutas."""
+    if not re.fullmatch(r"[\w.-]+\.css", name):
+        return None
+    f = CSS_DIR / name
+    return f.read_bytes() if f.is_file() else None
 
 
 def _range(q):

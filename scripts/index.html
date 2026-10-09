@@ -4,65 +4,68 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>session-log</title>
-<style>
-  :root { color-scheme: light dark; --b: #8884; --muted: #888; }
-  body { font: 15px/1.5 system-ui, sans-serif; max-width: 860px; margin: 0 auto; padding: 16px; }
-  h1 { font-size: 1.2rem; margin: 0 0 12px; }
-  .bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
-  input, select, textarea, button { font: inherit; padding: 4px 8px; }
-  textarea { width: 100%; box-sizing: border-box; }
-  .card { border: 1px solid var(--b); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
-  .meta { color: var(--muted); font-size: .85rem; }
-  .summary { white-space: pre-wrap; margin: 6px 0; }
-  .tag { background: var(--b); border-radius: 4px; padding: 0 6px; font-size: .8rem; margin-right: 4px; }
-  .actions { display: flex; gap: 6px; margin-top: 6px; }
-  dialog { width: min(640px, 94vw); }
-  dialog label { display: block; margin-top: 8px; font-size: .85rem; color: var(--muted); }
-  #report { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: .85rem; }
-  #msg { color: #c33; }
-</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-<h1>session-log</h1>
+<main>
+<header>
+  <h1>Session<em>·</em>log</h1>
+  <div class="stats">
+    <div><b id="s-n">0</b>sesiones</div>
+    <div><b id="s-p">0</b>proyectos</div>
+    <div><b id="s-t">0</b>pendientes</div>
+  </div>
+</header>
 
-<div class="bar">
-  <label>Últimos <input id="last" type="number" min="1" value="7" style="width:4em"> días</label>
-  <label>Desde <input id="from" type="date"></label>
-  <label>Hasta <input id="to" type="date"></label>
-  <select id="area">
-    <option value="">Todas las áreas</option>
-    <option>trabajo</option><option>personal</option><option>sin-area</option>
-  </select>
-  <input id="project" placeholder="Proyecto">
-  <button id="search">Buscar</button>
-  <button id="make-report">Crear reporte</button>
-  <button id="token-btn" title="Token de acceso">🔑</button>
-</div>
-<div id="msg"></div>
+<form class="filters" id="filters" onsubmit="return false">
+  <div class="seg" role="radiogroup" aria-label="Área">
+    <label><input type="radio" name="area" value="" checked>Todas</label>
+    <label><input type="radio" name="area" value="trabajo">Trabajo</label>
+    <label><input type="radio" name="area" value="personal">Personal</label>
+    <label><input type="radio" name="area" value="sin-area">Sin área</label>
+  </div>
+  <label class="field">Últimos <input id="last" type="number" min="1" value="7" style="width:4.2em"> días</label>
+  <label class="field">Desde <input id="from" type="date"></label>
+  <label class="field">Hasta <input id="to" type="date"></label>
+  <input id="project" type="text" placeholder="proyecto…" aria-label="Proyecto">
+  <span class="grow"></span>
+  <button id="search" type="submit">Buscar</button>
+  <button id="make-report" type="button" class="primary">Crear reporte</button>
+  <button id="token-btn" type="button" title="Token de acceso" aria-label="Token de acceso">🔑</button>
+</form>
+<div id="msg" role="status"></div>
 <div id="list"></div>
+</main>
 
 <dialog id="edit">
   <form method="dialog" id="edit-form">
+    <h2>Editar sesión</h2>
     <label>Área <select name="area"><option>trabajo</option><option>personal</option></select></label>
-    <label>Proyecto <input name="project" style="width:100%;box-sizing:border-box"></label>
+    <label>Proyecto <input name="project"></label>
     <label>Resumen <textarea name="summary" rows="6" required></textarea></label>
-    <label>Decisiones (una por línea) <textarea name="decisions" rows="3"></textarea></label>
-    <label>Pendientes (una por línea) <textarea name="pending" rows="3"></textarea></label>
-    <label>Tags (separados por coma) <input name="tags" style="width:100%;box-sizing:border-box"></label>
-    <div class="actions"><button value="ok">Guardar</button><button value="cancel" formnovalidate>Cancelar</button></div>
+    <label>Decisiones · una por línea <textarea name="decisions" rows="3"></textarea></label>
+    <label>Pendientes · una por línea <textarea name="pending" rows="3"></textarea></label>
+    <label>Tags · separados por coma <input name="tags"></label>
+    <div class="actions"><button value="cancel" formnovalidate>Cancelar</button><button value="ok" class="primary">Guardar</button></div>
   </form>
 </dialog>
 
 <dialog id="rep">
+  <h2>Reporte</h2>
   <div id="report"></div>
-  <div class="actions"><button id="copy">Copiar</button><button onclick="rep.close()">Cerrar</button></div>
+  <div class="actions"><button id="copy">Copiar</button><button id="close-rep" class="primary">Cerrar</button></div>
 </dialog>
 
 <script>
 const $ = id => document.getElementById(id);
 const lines = s => s.split("\n").map(x => x.trim()).filter(Boolean);
+const el = (tag, props = {}, ...kids) => { const n = Object.assign(document.createElement(tag), props); n.append(...kids); return n; };
 const store = { get: () => { try { return localStorage.token || ""; } catch { return ""; } },
                 set: t => { try { localStorage.token = t; } catch {} } };
+const COLOR = { trabajo: "var(--trabajo)", personal: "var(--personal)" };
 let sessions = [];
 
 async function api(method, url, body) {
@@ -80,38 +83,60 @@ async function api(method, url, body) {
 
 function query() {
   const p = new URLSearchParams();
-  const f = $("from").value, t = $("to").value;
+  const f = $("from").value, t = $("to").value, area = $("filters").elements.area.value;
   if (f || t) { if (f) p.set("from", f); if (t) p.set("to", t); }
   else p.set("last", $("last").value || 7);
-  if ($("area").value) p.set("area", $("area").value);
+  if (area) p.set("area", area);
   if ($("project").value.trim()) p.set("project", $("project").value.trim());
   return p.toString();
 }
 
 const run = fn => async (...a) => { $("msg").textContent = ""; try { await fn(...a); } catch (e) { $("msg").textContent = "Error: " + e.message; } };
 
-const el = (tag, props = {}, ...kids) => { const n = Object.assign(document.createElement(tag), props); n.append(...kids); return n; };
-
-function render() {
-  $("list").replaceChildren(...(sessions.length ? sessions.slice().reverse().map(card) : [el("p", { textContent: "Sin sesiones en ese periodo." })]));
+function list(cls, label, items) {
+  return el("ul", { className: "list " + cls }, el("span", { className: "k", textContent: label }),
+    ...items.map(t => el("li", { textContent: t })));
 }
 
-function card(s) {
-  const d = new Date(s.created_at);
-  const c = el("div", { className: "card" },
-    el("div", { className: "meta", textContent: `#${s.id} · ${d.toLocaleString()} · ${s.project} · ${s.area || "sin-area"}` }),
+function card(s, i) {
+  const c = el("article", { className: "card" });
+  c.style.setProperty("--c", COLOR[s.area] || "var(--none)");
+  c.style.setProperty("--i", Math.min(i, 12));
+  c.append(
+    el("div", { className: "meta" },
+      el("span", { className: "stamp", textContent: s.area || "sin área" }),
+      el("span", { className: "project", textContent: s.project }),
+      el("span", { textContent: new Date(s.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }),
+      el("span", { textContent: "#" + s.id })),
     el("div", { className: "summary", textContent: s.summary }));
-  for (const [label, key] of [["Decisiones", "decisions"], ["Pendientes", "pending"]])
-    if (s[key].length) c.append(el("div", { className: "meta", textContent: `${label}: ${s[key].join(" · ")}` }));
-  if (s.tags.length) c.append(el("div", {}, ...s.tags.map(t => el("span", { className: "tag", textContent: t }))));
+  if (s.decisions.length) c.append(list("dec", "Decisiones", s.decisions));
+  if (s.pending.length) c.append(list("pen", "Pendientes", s.pending));
+  if (s.tags.length) c.append(el("div", { className: "tags" }, ...s.tags.map(t => el("span", { className: "tag", textContent: t }))));
   c.append(el("div", { className: "actions" },
     el("button", { textContent: "Editar", onclick: () => openEdit(s) }),
-    el("button", { textContent: "Borrar", onclick: run(async () => {
+    el("button", { className: "danger", textContent: "Borrar", onclick: run(async () => {
       if (!confirm(`¿Borrar la sesión #${s.id}? No se puede deshacer.`)) return;
       await api("DELETE", `/api/sessions/${s.id}`);
       await load();
     }) })));
   return c;
+}
+
+function render() {
+  $("s-n").textContent = sessions.length;
+  $("s-p").textContent = new Set(sessions.map(s => s.project)).size;
+  $("s-t").textContent = sessions.reduce((n, s) => n + s.pending.length, 0);
+  if (!sessions.length) return $("list").replaceChildren(el("div", { className: "empty", textContent: "Nada anotado en este periodo." }));
+  const days = new Map();
+  [...sessions].reverse().forEach(s => {
+    const k = new Date(s.created_at).toLocaleDateString("es", { weekday: "long", day: "numeric", month: "long" });
+    (days.get(k) || days.set(k, []).get(k)).push(s);
+  });
+  let i = 0;
+  $("list").replaceChildren(...[...days].flatMap(([day, rows]) => [
+    el("h3", { className: "day" }, day, el("span", { textContent: `${rows.length} ${rows.length === 1 ? "sesión" : "sesiones"}` })),
+    ...rows.map(s => card(s, i++)),
+  ]));
 }
 
 const load = run(async () => { sessions = await api("GET", "/api/sessions?" + query()); render(); });
@@ -145,7 +170,12 @@ $("make-report").onclick = run(async () => {
   $("report").textContent = text;
   $("rep").showModal();
 });
-$("copy").onclick = () => navigator.clipboard.writeText($("report").textContent);
+$("copy").onclick = async e => {
+  await navigator.clipboard.writeText($("report").textContent);
+  e.target.textContent = "¡Copiado!"; setTimeout(() => e.target.textContent = "Copiar", 1500);
+};
+$("close-rep").onclick = () => $("rep").close();
+$("filters").addEventListener("change", e => { if (e.target.name === "area") load(); });
 $("search").onclick = load;
 $("token-btn").onclick = () => { const t = prompt("Token de acceso:", store.get()); if (t !== null) { store.set(t); load(); } };
 load();
