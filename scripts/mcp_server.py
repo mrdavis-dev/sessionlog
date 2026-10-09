@@ -19,8 +19,10 @@ import json
 import os
 import sys
 import traceback
+from urllib.parse import urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import web
 from common import AREAS, load_env
 from sessions import (
     NO_AREA,
@@ -223,7 +225,7 @@ class MCPHandler(BaseHTTPRequestHandler):
         if body is not None:
             self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
-        if self.command == "POST" and not self.body_read:
+        if self.command in ("POST", "PUT") and not self.body_read:
             # El cuerpo sin leer quedaría en la conexión keep-alive y corrompería la siguiente petición.
             self.send_header("Connection", "close")
             self.close_connection = True
@@ -244,8 +246,58 @@ class MCPHandler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin")
         return origin is None or origin in self.server.allowed_origins
 
+    def send_page(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(web.PAGE)))
+        self.end_headers()
+        self.wfile.write(web.PAGE)
+
+    def handle_api(self):
+        url = urlparse(self.path)
+        # Con token, el Bearer (que el navegador no envía solo) ya impide CSRF y rebinding.
+        if not self.server.auth_token and not self.origin_allowed_local():
+            return self.send(403, {"error": "origen no permitido"})
+        if not self.authorized():
+            return self.send(401, {"error": "no autorizado"}, [("WWW-Authenticate", "Bearer")])
+        body = None
+        if self.command == "PUT":
+            try:
+                length = int(self.headers.get("Content-Length", ""))
+            except ValueError:
+                return self.send(411, {"error": "falta Content-Length"})
+            if length > MAX_BODY:
+                return self.send(413, {"error": "cuerpo demasiado grande"})
+            raw = self.rfile.read(length)
+            self.body_read = True
+            try:
+                body = json.loads(raw)
+            except ValueError:
+                return self.send(400, {"error": "JSON inválido"})
+            if not isinstance(body, dict):
+                return self.send(400, {"error": "se esperaba un objeto"})
+        self.send(*web.api(self.command, url.path, url.query, body))
+
+    def origin_allowed_local(self):
+        # Sin token (solo localhost): acepta Origin ausente, configurado o igual al Host loopback.
+        origin, host = self.headers.get("Origin"), self.headers.get("Host", "")
+        return (
+            origin is None
+            or origin in self.server.allowed_origins
+            or (origin == f"http://{host}" and host.rsplit(":", 1)[0].strip("[]") in LOOPBACK)
+        )
+
+    def do_PUT(self):
+        if self.path.startswith("/api/"):
+            return self.handle_api()
+        self.send(404, {"error": "no encontrado"})
+
     def do_GET(self):
-        if self.path == "/health":
+        if self.path.startswith("/api/"):
+            self.handle_api()
+        elif self.path in ("/", "/index.html"):
+            self.send_page()
+        elif self.path == "/health":
             self.send(200, {"status": "ok"})
         elif self.path == MCP_PATH:
             self.send(405, {"error": "este servidor no ofrece stream SSE"}, [("Allow", "POST")])
@@ -253,6 +305,8 @@ class MCPHandler(BaseHTTPRequestHandler):
             self.send(404, {"error": "no encontrado"})
 
     def do_DELETE(self):
+        if self.path.startswith("/api/"):
+            return self.handle_api()
         self.send(405, {"error": "sin sesiones"}, [("Allow", "POST")])
 
     def do_POST(self):

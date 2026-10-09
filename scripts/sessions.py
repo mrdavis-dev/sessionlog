@@ -176,3 +176,31 @@ def set_area(area, ids=(), project=None, force=False):
     with conn:
         cur = conn.execute(f"UPDATE sessions SET area = ? WHERE {' AND '.join(conditions)}", params)
     return cur.rowcount
+
+
+def update_session(session_id, **fields):
+    """Edita campos de una sesión (area, project, summary, decisions, pending, tags). False si no existe."""
+    sets, params = [], []
+    for key, value in fields.items():
+        if key == "area" and value not in AREAS:
+            raise ValueError(f"area debe ser una de: {', '.join(AREAS)}")
+        if key == "summary" and not (value or "").strip():
+            raise ValueError("el resumen está vacío")
+        if key in ("decisions", "pending", "tags"):
+            value = json.dumps(list(value), ensure_ascii=False)
+        elif key not in ("area", "project", "summary"):
+            raise ValueError(f"campo no editable: {key}")
+        sets.append(f"{key} = ?")
+        params.append(value.strip() if key == "summary" else value or ("general" if key == "project" else value))
+    if not sets:
+        raise ValueError("nada que actualizar")
+    conn = get_connection()
+    with conn:
+        cur = conn.execute(f"UPDATE sessions SET {', '.join(sets)} WHERE id = ?", params + [session_id])
+    return cur.rowcount > 0
+
+
+def delete_session(session_id):
+    conn = get_connection()
+    with conn:
+        return conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,)).rowcount > 0

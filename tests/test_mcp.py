@@ -172,6 +172,24 @@ class HTTPTest(TempDBTestCase):
         self.assertEqual(self.request(body={"jsonrpc": "2.0", "method": "ping"}, path="/otro")[0], 404)
         self.assertEqual(self.request(body={"jsonrpc": "2.0", "method": "notifications/initialized"})[0], 202)
 
+    def test_web_api_edit_delete_report(self):
+        call("save_session", area="trabajo", summary="Uno", project="blog", pending=["Publicar"])
+        status, rows = self.request("GET", "/api/sessions?last=1")
+        self.assertEqual((status, len(rows)), (200, 1))
+        sid = rows[0]["id"]
+        self.assertEqual(self.request("PUT", f"/api/sessions/{sid}", {"summary": "Editado", "area": "personal"})[0], 200)
+        self.assertEqual(self.request("PUT", f"/api/sessions/{sid}", {"area": "x"})[0], 400)
+        self.assertEqual(self.request("PUT", "/api/sessions/999", {"summary": "a"})[0], 404)
+        _, rep = self.request("GET", "/api/report?last=1&area=personal")
+        self.assertIn("Editado", rep["text"])
+        self.assertEqual(self.request("DELETE", f"/api/sessions/{sid}")[0], 200)
+        self.assertEqual(self.request("GET", "/api/sessions?last=1")[1], [])
+        self.assertEqual(self.request("GET", "/api/sessions", token=None)[0], 401)
+
+    def test_web_page(self):
+        with urllib.request.urlopen(self.base + "/") as resp:
+            self.assertIn(b"session-log", resp.read())
+
 
 if __name__ == "__main__":
     unittest.main()
