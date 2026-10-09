@@ -188,7 +188,11 @@ class HTTPTest(TempDBTestCase):
 
     def test_web_page(self):
         with urllib.request.urlopen(self.base + "/") as resp:
-            self.assertIn(b"session-log", resp.read())
+            self.assertIn(b"/css/style.css", resp.read())
+        with urllib.request.urlopen(self.base + "/css/style.css") as resp:
+            self.assertEqual(resp.headers["Content-Type"], "text/css; charset=utf-8")
+        for bad in ("/css/..%2Fweb.py", "/css/nada.css", "/css/"):
+            self.assertEqual(self.request("GET", bad, token=None)[0], 404)
 
 
 if __name__ == "__main__":

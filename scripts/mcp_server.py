@@ -246,12 +246,12 @@ class MCPHandler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin")
         return origin is None or origin in self.server.allowed_origins
 
-    def send_page(self):
+    def send_static(self, data, content_type):
         self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(web.PAGE)))
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
         self.end_headers()
-        self.wfile.write(web.PAGE)
+        self.wfile.write(data)
 
     def handle_api(self):
         url = urlparse(self.path)
@@ -296,7 +296,13 @@ class MCPHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/"):
             self.handle_api()
         elif self.path in ("/", "/index.html"):
-            self.send_page()
+            self.send_static(web.PAGE, "text/html; charset=utf-8")
+        elif self.path.startswith("/css/"):
+            data = web.css(self.path[5:])
+            if data is None:
+                self.send(404, {"error": "no encontrado"})
+            else:
+                self.send_static(data, "text/css; charset=utf-8")
         elif self.path == "/health":
             self.send(200, {"status": "ok"})
         elif self.path == MCP_PATH:
